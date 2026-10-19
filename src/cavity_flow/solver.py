@@ -108,31 +108,51 @@ class CavitySolver:
         return fu, fv
 
     def _poisson(self, rhs: FloatArray) -> tuple[FloatArray, int, float]:
-        """Jacobi solve for a cell-centred Laplacian with mirrored Neumann edges."""
+        """Solve the cell-centred pressure correction with homogeneous Neumann walls.
+
+        The Jacobi diagonal counts only real neighboring cells. The residual uses
+        mirrored ghost values, which represent zero-normal-gradient boundary faces.
+        This matches the Laplacian induced by divergence(gradient(phi)) on this MAC grid.
+        """
+        nx, ny = self.cfg.nx, self.cfg.ny
         dx2, dy2 = self.dx**2, self.dy**2
-        denom = 2/dx2 + 2/dy2
-        rhs = rhs - np.mean(rhs)  # remove incompatible roundoff/mean component
+        rhs = np.asarray(rhs, dtype=float)
+        if rhs.shape != (ny, nx):
+            raise ValueError(f"rhs must have shape {(ny, nx)}, got {rhs.shape}")
+        # A Neumann Poisson problem is solvable only when the RHS has zero mean.
+        rhs = rhs - np.mean(rhs)
         phi = np.zeros_like(rhs)
 
-        def neighbors(a: FloatArray):
+        diagonal = np.full_like(rhs, 2.0 / dx2 + 2.0 / dy2)
+        diagonal[:, 0] -= 1.0 / dx2
+        diagonal[:, -1] -= 1.0 / dx2
+        diagonal[0, :] -= 1.0 / dy2
+        diagonal[-1, :] -= 1.0 / dy2
+
+        def apply_laplacian(a: FloatArray) -> FloatArray:
             east = np.empty_like(a); west = np.empty_like(a)
             north = np.empty_like(a); south = np.empty_like(a)
             east[:, :-1], east[:, -1] = a[:, 1:], a[:, -1]
             west[:, 1:], west[:, 0] = a[:, :-1], a[:, 0]
             north[:-1, :], north[-1, :] = a[1:, :], a[-1, :]
             south[1:, :], south[0, :] = a[:-1, :], a[0, :]
-            return east, west, north, south
+            return (east - 2.0*a + west) / dx2 + (north - 2.0*a + south) / dy2
 
         residual = float("inf")
         for it in range(1, self.cfg.pressure_max_iterations + 1):
-            e, w, n, s = neighbors(phi)
-            phi = ((e + w) / dx2 + (n + s) / dy2 - rhs) / denom
-            phi -= np.mean(phi)
+            # Sum only actual neighbors; boundary ghost values are not unknowns.
+            weighted = np.zeros_like(phi)
+            weighted[:, :-1] += phi[:, 1:] / dx2
+            weighted[:, 1:] += phi[:, :-1] / dx2
+            weighted[:-1, :] += phi[1:, :] / dy2
+            weighted[1:, :] += phi[:-1, :] / dy2
+            phi = (weighted - rhs) / diagonal
+            phi -= np.mean(phi)  # fix the arbitrary pressure gauge
             if it == 1 or it % 10 == 0:
-                e, w, n, s = neighbors(phi)
-                residual = float(np.max(np.abs((e - 2*phi + w)/dx2 + (n - 2*phi + s)/dy2 - rhs)))
+                residual = float(np.max(np.abs(apply_laplacian(phi) - rhs)))
                 if residual <= self.cfg.pressure_tolerance:
                     return phi, it, residual
+        residual = float(np.max(np.abs(apply_laplacian(phi) - rhs)))
         return phi, self.cfg.pressure_max_iterations, residual
 
     def step(self) -> dict[str, float]:
