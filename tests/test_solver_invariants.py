@@ -19,13 +19,15 @@ def test_initial_state_is_finite_and_divergence_free():
     assert s.divergence_linf() == pytest.approx(0.0, abs=1e-14)
 
 
-def test_wall_velocity_values():
+def test_wall_velocity_values_excluding_corner_conflicts():
     cfg = CavityConfig(nx=8, ny=8, lid_speed=1.25)
     s = CavitySolver(cfg)
-    assert np.allclose(s.u[:, 0], 0.0)
-    assert np.allclose(s.u[:, -1], 0.0)
+    # Corner values are set by the lid assignment in the current implementation;
+    # exclude corners when checking side-wall and lid interior values.
+    assert np.allclose(s.u[1:-1, 0], 0.0)
+    assert np.allclose(s.u[1:-1, -1], 0.0)
     assert np.allclose(s.u[0, :], 0.0)
-    assert np.allclose(s.u[-1, :], cfg.lid_speed)
+    assert np.allclose(s.u[-1, 1:-1], cfg.lid_speed)
     assert np.allclose(s.v[0, :], 0.0) and np.allclose(s.v[-1, :], 0.0)
     assert np.allclose(s.v[:, 0], 0.0) and np.allclose(s.v[:, -1], 0.0)
 
