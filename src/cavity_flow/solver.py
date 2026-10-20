@@ -137,23 +137,38 @@ class CavitySolver:
         return fu, fv
 
     def _apply_pressure_laplacian(self, a: FloatArray) -> FloatArray:
-        """Apply the cell-centred Laplacian with zero-normal-gradient ghosts."""
-        east = np.empty_like(a)
-        west = np.empty_like(a)
-        north = np.empty_like(a)
-        south = np.empty_like(a)
-        east[:, :-1], east[:, -1] = a[:, 1:], a[:, -1]
-        west[:, 1:], west[:, 0] = a[:, :-1], a[:, 0]
-        north[:-1, :], north[-1, :] = a[1:, :], a[-1, :]
-        south[1:, :], south[0, :] = a[:-1, :], a[0, :]
-        return (east - 2*a + west) / self.dx**2 + (north - 2*a + south) / self.dy**2
+        """Apply the Laplacian induced by the free pressure-gradient faces.
+
+        Tangential velocity values on the walls are assigned by
+        :meth:`apply_boundaries_to`, so pressure correction is restricted to
+        faces that are not subsequently overwritten. Constructing the
+        Laplacian as divergence(gradient) prevents a boundary-only correction
+        from making the Poisson solve and projection disagree.
+        """
+        gradient_u = np.zeros_like(self.u)
+        gradient_v = np.zeros_like(self.v)
+        gradient_u[1:-1, 1:-1] = (a[:, 1:] - a[:, :-1])[1:-1, :] / self.dx
+        gradient_v[1:-1, 1:-1] = (a[1:, :] - a[:-1, :])[:, 1:-1] / self.dy
+        return self.divergence(gradient_u, gradient_v)
+
+    def _pressure_gradient(self, phi: FloatArray) -> tuple[FloatArray, FloatArray]:
+        """Return pressure gradients on velocity faces that are not wall values."""
+        if phi.shape != self.p.shape:
+            raise ValueError(f"phi must have shape {self.p.shape}, got {phi.shape}")
+        gradient_u = np.zeros_like(self.u)
+        gradient_v = np.zeros_like(self.v)
+        gradient_u[1:-1, 1:-1] = (phi[:, 1:] - phi[:, :-1])[1:-1, :] / self.dx
+        gradient_v[1:-1, 1:-1] = (phi[1:, :] - phi[:-1, :])[:, 1:-1] / self.dy
+        return gradient_u, gradient_v
 
     def _poisson(self, rhs: FloatArray) -> tuple[FloatArray, int, float]:
-        """Jacobi solve for Laplacian(phi)=rhs with homogeneous Neumann walls.
+        """Solve Laplacian(phi)=rhs with homogeneous Neumann walls.
 
         The right-hand side is projected to zero mean to satisfy the Neumann
-        compatibility condition. The returned residual is computed from the
-        discrete operator used by the solver.
+        compatibility condition. Conjugate gradients are applied to the
+        positive-semidefinite operator ``-L`` on its zero-mean subspace. The
+        returned residual is computed from the same discrete Laplacian used by
+        the velocity correction.
         """
         if rhs.shape != (self.cfg.ny, self.cfg.nx):
             raise ValueError(f"rhs must have shape {(self.cfg.ny, self.cfg.nx)}, got {rhs.shape}")
@@ -161,26 +176,29 @@ class CavitySolver:
             raise ValueError("Poisson RHS must contain only finite values")
         rhs = np.asarray(rhs, dtype=float) - float(np.mean(rhs))
         phi = np.zeros_like(rhs)
-        dx2, dy2 = self.dx**2, self.dy**2
-        diagonal = np.full_like(rhs, 2.0 / dx2 + 2.0 / dy2)
-        diagonal[:, 0] -= 1.0 / dx2
-        diagonal[:, -1] -= 1.0 / dx2
-        diagonal[0, :] -= 1.0 / dy2
-        diagonal[-1, :] -= 1.0 / dy2
+        residual_field = -rhs - (-self._apply_pressure_laplacian(phi))
+        residual = float(np.max(np.abs(residual_field)))
+        if residual <= self.cfg.pressure_tolerance:
+            return phi, 0, residual
 
-        residual = float("inf")
+        direction = residual_field.copy()
+        residual_norm_sq = float(np.sum(residual_field * residual_field))
         for it in range(1, self.cfg.pressure_max_iterations + 1):
-            weighted = np.zeros_like(phi)
-            weighted[:, :-1] += phi[:, 1:] / dx2
-            weighted[:, 1:] += phi[:, :-1] / dx2
-            weighted[:-1, :] += phi[1:, :] / dy2
-            weighted[1:, :] += phi[:-1, :] / dy2
-            phi = (weighted - rhs) / diagonal
+            matrix_direction = -self._apply_pressure_laplacian(direction)
+            denominator = float(np.sum(direction * matrix_direction))
+            if denominator <= 0.0 or not math.isfinite(denominator):
+                break
+            step = residual_norm_sq / denominator
+            phi += step * direction
             phi -= float(np.mean(phi))
-            if it == 1 or it % 10 == 0 or it == self.cfg.pressure_max_iterations:
-                residual = float(np.max(np.abs(self._apply_pressure_laplacian(phi) - rhs)))
-                if residual <= self.cfg.pressure_tolerance:
-                    return phi, it, residual
+            residual_field -= step * matrix_direction
+            residual_field -= float(np.mean(residual_field))
+            residual = float(np.max(np.abs(residual_field)))
+            if residual <= self.cfg.pressure_tolerance:
+                return phi, it, residual
+            next_norm_sq = float(np.sum(residual_field * residual_field))
+            direction = residual_field + (next_norm_sq / residual_norm_sq) * direction
+            residual_norm_sq = next_norm_sq
         return phi, self.cfg.pressure_max_iterations, residual
 
     def step(self) -> dict[str, float | bool]:
@@ -195,8 +213,9 @@ class CavitySolver:
         phi, pressure_iterations, pressure_residual = self._poisson(rhs)
 
         un, vn = us.copy(), vs.copy()
-        un[:, 1:-1] -= dt * (phi[:, 1:] - phi[:, :-1]) / self.dx
-        vn[1:-1, :] -= dt * (phi[1:, :] - phi[:-1, :]) / self.dy
+        gradient_u, gradient_v = self._pressure_gradient(phi)
+        un -= dt * gradient_u
+        vn -= dt * gradient_v
         self.u, self.v = un, vn
         self.apply_velocity_boundaries()
         self.p += phi

@@ -4,6 +4,96 @@
 
 Cavity Flow Lab is an experimental two-dimensional incompressible lid-driven cavity solver. It is not yet a validated CFD package. Software tests, discrete mass conservation, reference-data agreement, grid convergence, and runtime are distinct questions.
 
+## Repair validation on `fix/projection-operator-consistency`
+
+The merged `main` at `c05c6b9a4938e48b5238b60be7a354d6c9a94272` failed
+`tests/test_solver.py::test_projection_reduces_divergence_to_poisson_tolerance`.
+The exact CI traceback was:
+
+```text
+assert 3.689083450379851 <= 1e-10
+```
+
+The failure was reproducible in a clean Python 3.12.3 virtual environment with
+NumPy 2.5.4: `1 failed, 18 passed`. The root causes were (1) Jacobi stagnation
+at that residual after 10,000 iterations and (2) a mismatch between the
+pressure Laplacian and the pressure-gradient faces that were later overwritten
+by the wall boundary assignment. The repair uses projected conjugate gradients
+for the same discrete operator and constructs that operator as the divergence
+of the free-face pressure gradient. The repaired suite reports `20 passed`.
+
+Reproduce the software and projection checks with:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e "[dev]"
+pytest -q
+python scripts/benchmark.py --grids 8 --steps 2 --repeats 1 \
+  --output results/ci-benchmark.json
+```
+
+For the exact random 8x8 projection case, using cell-centred pressure,
+staggered face velocities, and the infinity norm over all cells, the repaired
+run measured pre-projection `29.888522548610382`, post-projection
+`4.760636329592671e-11`, and pressure residual
+`4.760764040963687e-11` in 33 iterations. The discrete global mass sum was
+within roundoff in the time-dependent runs. All pressure and velocity fields
+were finite, and the prescribed wall values were retained.
+
+The old `main` parent reproduces a post-projection value of `8.175570219322616`
+for that same random case, not the previously reported `0.0944`. On the
+repaired commit, the two-step 8x8 benchmark gives post-projection divergence
+`8.649134410927814e-12`. Therefore `0.0944` was not independently reproduced
+from the recorded configuration; it should not be treated as a validated
+result. The discrepancy is explained qualitatively by the old boundary
+overwrite and inconsistent/stagnated solve, but its original provenance remains
+unknown.
+
+The operator audit verifies, to about `1e-12` on a random 8x6 field, that the
+implemented pressure Laplacian equals the divergence of the exact gradient
+used for correction. This is a cell-centred finite-volume divergence with
+`u` shaped `(ny, nx+1)`, `v` shaped `(ny+1, nx)`, and pressure shaped
+`(ny, nx)`. Pressure correction is applied only to non-wall velocity faces;
+the top-row tangential lid values and side-wall values are not subsequently
+changed by projection.
+
+## Re=100 evidence and limits
+
+The Ghia, Ghia & Shin (1982) tabulations were compared at Re=100. The
+published coordinates were linearly interpolated to the solver's cell-centre
+coordinates; no extrapolation or point matching was used. On a 32x32 run with
+adaptive time steps, pressure tolerance `1e-8`, pressure iteration limit
+`3000`, 2,000 steps, and simulated time `10.960780857927581`, the final
+centreline errors were:
+
+```text
+vertical u profile:   RMSE 0.03296268185927465, max |error| 0.106016292735054
+horizontal v profile: RMSE 0.01621946281505418, max |error| 0.029577323717949
+```
+
+The final pressure residual was `8.682251155641196e-09` after 150 iterations;
+post-projection divergence was `4.695799304954562e-11`; all fields were finite.
+The run had not met the requested velocity-update steady criterion by the
+2,000-step cap (`max(du_linf,dv_linf)=1.4223919926198425e-06`), so these are
+transient/finite-grid comparison results, not a claim of benchmark validation.
+The source tabulations are the u and v tables attributed to Ghia et al. in
+the [u-data gist](https://gist.github.com/ivan-pi/3e9326d18a366ffe6a8e5bfda6353219)
+and [v-data gist](https://gist.github.com/ivan-pi/caa6c6737d36a9140fbcf2ea59c78b3c),
+with the publication identified there as *Journal of Computational Physics*
+48(3), 387–411 (1982).
+
+At matched physical time near `T=0.25`, adaptive runs used 18, 39, and 86
+steps on 16x16, 32x32, and 64x64 grids. Kinetic energies were respectively
+`0.0339712073`, `0.0223552403`, and `0.0176576565`; post-projection divergence
+was `1.22e-10`, `4.46e-11`, and `2.81e-11`. On 32x32, fixed `dt=0.01` and
+`dt=0.005` gave kinetic energies `0.0223552403` and `0.0222431116` at matched
+time near 0.25. These sensitivity results are finite-time diagnostics only.
+
+The evidence supports a software-level projection repair and discrete mass
+conservation for the stated convention. It does not support the stronger claim
+that this implementation is an accurate or validated Navier–Stokes solver.
+
 ## Reproduce
 
 ```bash

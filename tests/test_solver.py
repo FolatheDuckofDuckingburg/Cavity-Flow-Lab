@@ -14,13 +14,24 @@ def test_projection_reduces_divergence_to_poisson_tolerance():
     before = solver.divergence(u, v)
     phi, _, residual = solver._poisson(before)
     uc, vc = u.copy(), v.copy()
-    uc[:, 1:-1] -= (phi[:, 1:] - phi[:, :-1]) / solver.dx
-    vc[1:-1, :] -= (phi[1:, :] - phi[:-1, :]) / solver.dy
+    gradient_u, gradient_v = solver._pressure_gradient(phi)
+    uc -= gradient_u
+    vc -= gradient_v
     solver.apply_boundaries_to(uc, vc)
     after = solver.divergence(uc, vc)
     assert residual <= solver.cfg.pressure_tolerance
     assert np.max(np.abs(after)) < 1e-8
     assert np.max(np.abs(after)) < np.max(np.abs(before)) * 1e-6
+
+
+def test_pressure_laplacian_matches_divergence_of_pressure_gradient():
+    rng = np.random.default_rng(11)
+    solver = CavitySolver(CavityConfig(nx=8, ny=6))
+    phi = rng.normal(size=solver.p.shape)
+    gradient_u, gradient_v = solver._pressure_gradient(phi)
+    assert solver.divergence(gradient_u, gradient_v) == pytest.approx(
+        solver._apply_pressure_laplacian(phi), abs=1e-12
+    )
 
 
 def test_poisson_solution_is_finite_and_zero_mean():
