@@ -101,8 +101,8 @@ Reference data must be transcribed and verified against the publication before u
 ## Known limitations
 
 - The current wall-value convention is simplified, including a lid/side-wall corner conflict.
-- The pressure solve is a basic Jacobi iteration and may be slow at finer grids.
-- The discrete operators and boundary treatment still require independent verification.
+- The pressure solve uses projected conjugate gradients and may be slow at finer grids.
+- The discrete operators and boundary treatment are documented and regression-tested, but physical accuracy still requires independent verification.
 - Grid-study output alone does not prove convergence.
 - A small pressure residual does not guarantee a correct velocity field.
 - This 2D cavity code does not validate 3D flows, arbitrary geometries, turbulence models, experimental predictions, or the general Navier–Stokes regularity problem.
@@ -110,6 +110,10 @@ Reference data must be transcribed and verified against the publication before u
 ## Contributing
 
 Numerical changes should include tests and reproducible evidence. Preserve failed runs and document limitations rather than hiding discrepancies.
+
+The current repair evidence, including the exact CI failure, operator audit,
+Ghia-profile comparison, and matched-time grid/time-step studies, is recorded
+in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## License
 
