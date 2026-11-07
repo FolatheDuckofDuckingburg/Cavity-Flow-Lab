@@ -83,6 +83,7 @@ def test_run_rejects_non_integer_step_counts(kwargs):
     {"max_steps": 1.5}, {"max_steps": True}, {"min_steps": 1.5},
     {"consecutive": 1.5}, {"tolerance": float("nan")},
     {"tolerance": float("inf")}, {"tolerance": 0.0},
+    {"tolerance": True}, {"tolerance": "1e-7"}, {"tolerance": None},
 ])
 def test_run_until_steady_rejects_invalid_stopping_parameters(kwargs):
     solver = CavitySolver(CavityConfig(nx=8, ny=8))
