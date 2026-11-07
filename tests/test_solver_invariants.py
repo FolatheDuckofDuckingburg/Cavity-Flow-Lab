@@ -35,8 +35,10 @@ def test_wall_velocity_values_excluding_corner_conflicts():
 
 
 @pytest.mark.parametrize("kwargs", [
-    {"nx": 3}, {"ny": 2}, {"reynolds": 0}, {"length": 0},
-    {"lid_speed": 0}, {"dt": 0}, {"dt": -0.1}, {"cfl": 0},
+    {"nx": 3}, {"ny": 2}, {"nx": 4.5}, {"ny": True},
+    {"pressure_max_iterations": 1.5}, {"pressure_max_iterations": True},
+    {"reynolds": 0}, {"length": 0}, {"lid_speed": 0},
+    {"dt": 0}, {"dt": -0.1}, {"cfl": 0},
 ])
 def test_invalid_configuration_is_rejected(kwargs):
     with pytest.raises(ValueError):
@@ -66,3 +68,23 @@ def test_run_until_steady_respects_max_steps():
     solver = CavitySolver(CavityConfig(nx=8, ny=8))
     history = solver.run_until_steady(max_steps=3, min_steps=2, tolerance=1e-30)
     assert len(history) == 3
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"steps": 1.5}, {"steps": True}, {"log_every": 1.5}, {"log_every": False},
+])
+def test_run_rejects_non_integer_step_counts(kwargs):
+    solver = CavitySolver(CavityConfig(nx=8, ny=8))
+    with pytest.raises(ValueError):
+        solver.run(**{"steps": 1, **kwargs})
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"max_steps": 1.5}, {"max_steps": True}, {"min_steps": 1.5},
+    {"consecutive": 1.5}, {"tolerance": float("nan")},
+    {"tolerance": float("inf")}, {"tolerance": 0.0},
+])
+def test_run_until_steady_rejects_invalid_stopping_parameters(kwargs):
+    solver = CavitySolver(CavityConfig(nx=8, ny=8))
+    with pytest.raises(ValueError):
+        solver.run_until_steady(**{"max_steps": 10, **kwargs})
