@@ -27,6 +27,9 @@ class CavityConfig:
     pressure_max_iterations: int = 2000
 
     def __post_init__(self) -> None:
+        for name, value in (("nx", self.nx), ("ny", self.ny), ("pressure_max_iterations", self.pressure_max_iterations)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
         if self.nx < 4 or self.ny < 4:
             raise ValueError("nx and ny must be >= 4")
         if not math.isfinite(self.reynolds) or self.reynolds <= 0:
@@ -238,8 +241,11 @@ class CavitySolver:
 
     def run(self, steps: int, log_every: int = 100) -> list[dict[str, float | bool]]:
         """Run a fixed number of steps; return snapshots including the final step."""
-        if steps < 1 or log_every < 1:
-            raise ValueError("steps and log_every must be >= 1")
+        for name, value in (("steps", steps), ("log_every", log_every)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+            if value < 1:
+                raise ValueError("steps and log_every must be >= 1")
         history: list[dict[str, float | bool]] = []
         for _ in range(steps):
             row = self.step()
@@ -255,8 +261,13 @@ class CavitySolver:
 
         This is a numerical stopping heuristic, not proof of physical steady state.
         """
-        if max_steps < 1 or min_steps < 1 or consecutive < 1 or tolerance <= 0:
-            raise ValueError("max_steps, min_steps, consecutive, and tolerance must be positive")
+        for name, value in (("max_steps", max_steps), ("min_steps", min_steps), ("consecutive", consecutive)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+            if value < 1:
+                raise ValueError("max_steps, min_steps, and consecutive must be >= 1")
+        if not math.isfinite(tolerance) or tolerance <= 0:
+            raise ValueError("tolerance must be finite and positive")
         history: list[dict[str, float | bool]] = []
         stable_count = 0
         for _ in range(max_steps):
