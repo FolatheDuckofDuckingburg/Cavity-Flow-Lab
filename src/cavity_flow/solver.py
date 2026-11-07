@@ -266,8 +266,13 @@ class CavitySolver:
                 raise ValueError(f"{name} must be an integer")
             if value < 1:
                 raise ValueError("max_steps, min_steps, and consecutive must be >= 1")
-        if not math.isfinite(tolerance) or tolerance <= 0:
-            raise ValueError("tolerance must be finite and positive")
+        if (
+            isinstance(tolerance, (bool, np.bool_))
+            or not isinstance(tolerance, (int, float, np.integer, np.floating))
+            or not math.isfinite(tolerance)
+            or tolerance <= 0
+        ):
+            raise ValueError("tolerance must be a finite, positive number")
         history: list[dict[str, float | bool]] = []
         stable_count = 0
         for _ in range(max_steps):
