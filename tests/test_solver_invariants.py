@@ -87,4 +87,4 @@ def test_run_rejects_non_integer_step_counts(kwargs):
 def test_run_until_steady_rejects_invalid_stopping_parameters(kwargs):
     solver = CavitySolver(CavityConfig(nx=8, ny=8))
     with pytest.raises(ValueError):
-        solver.run_until_steady(max_steps=10, **kwargs)
+        solver.run_until_steady(**{"max_steps": 10, **kwargs})
