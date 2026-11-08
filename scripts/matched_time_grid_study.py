@@ -32,6 +32,7 @@ def run_to_time(n: int, reynolds: float, target_time: float, dt_cap: float,
     )
     solver = CavitySolver(config)
     last: dict = {}
+    dt_values: list[float] = []
     while solver.time < target_time:
         if solver.iteration >= max_steps:
             raise RuntimeError(
@@ -41,6 +42,7 @@ def run_to_time(n: int, reynolds: float, target_time: float, dt_cap: float,
         # Keep the requested cap while shortening only the final step if needed.
         solver.cfg = replace(solver.cfg, dt=min(dt_cap, remaining))
         last = solver.step()
+        dt_values.append(float(last["dt"]))
 
     uc, vc, _ = solver.cell_centered_fields()
     y = (np.arange(n) + 0.5) / n
@@ -51,7 +53,8 @@ def run_to_time(n: int, reynolds: float, target_time: float, dt_cap: float,
         "target_time": target_time,
         "simulated_time": solver.time,
         "steps": solver.iteration,
-        "dt_min": min(float(row["dt"]) for row in [last]),
+        "dt_min": min(dt_values),
+        "dt_max": max(dt_values),
         "dt_last": float(last["dt"]),
         "divergence_linf": solver.divergence_linf(),
         "pressure_residual_linf": float(last["pressure_residual_linf"]),
